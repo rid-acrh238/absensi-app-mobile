@@ -13,7 +13,7 @@ class ApiConfig {
   // ----------------------------------------------------------------
   static const String serverIp = '10.186.149.86';
 
-  static const String rootUrl = 'http://$serverIp/absensi';
+  static const String rootUrl = 'https://informatikaku.alwaysdata.net';
 
 
   static const String baseUrl = '$rootUrl/api';
