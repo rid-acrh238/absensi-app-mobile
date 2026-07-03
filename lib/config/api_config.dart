@@ -11,8 +11,12 @@ class ApiConfig {
   // Contoh: 192.168.1.100
   // Jangan gunakan "localhost" karena di Android = loopback HP sendiri.
   // ----------------------------------------------------------------
-  static const String serverIp = '192.168.56.1';
-  static const String baseUrl = 'http://$serverIp/absensi/api';
+  static const String serverIp = 'localhost';
+
+  static const String rootUrl = 'http://$serverIp/absensi';
+
+
+  static const String baseUrl = '$rootUrl/api';
 
   // Endpoint login – POST nim & password
   static const String login = '$baseUrl/login.php';
@@ -29,4 +33,22 @@ class ApiConfig {
   // Base URL untuk foto (digunakan untuk menampilkan gambar dari server)
   // Contoh: http://192.168.0.170/absensi/uploads/foto_1_xxx.jpg
   static const String fotoBase = 'http://$serverIp/absensi';
+
+  static String getFotoUrl(String path) {
+  if (path.isEmpty) return '';
+
+  if (path.startsWith('http://') ||
+      path.startsWith('https://')) {
+    return path;
+  }
+
+  final cleanPath =
+      path.startsWith('/') ? path.substring(1) : path;
+
+  return '$rootUrl/$cleanPath';
 }
+
+
+}
+
+

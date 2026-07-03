@@ -4,8 +4,9 @@
 //        riwayat.php. Mengirim data lokasi + foto ke server.
 // ============================================================
 
+import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../config/api_config.dart';
@@ -21,17 +22,19 @@ class AbsensiService {
   
 
   Future<Map<String, dynamic>> kirimAbsensi({
-    required int userId,
-    required double latitude,
-    required double longitude,
-    File? fotoFile,
-  }) async {
-    // Encode foto ke Base64 jika ada
-    String fotoBase64 = '';
-    if (fotoFile != null) {
-      final bytes = await fotoFile.readAsBytes();
-      fotoBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-    }
+  required int userId,
+  required String jenisAbsen,
+  required double jarakMeter,
+  required double latitude,
+  required double longitude,
+  Uint8List? fotoBytes,
+}) async {
+  String fotoBase64 = '';
+
+  if (fotoBytes != null) {
+    fotoBase64 =
+        'data:image/jpeg;base64,${base64Encode(fotoBytes)}';
+  }
 
     try {
       final response = await http
@@ -40,8 +43,10 @@ class AbsensiService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'user_id': userId,
+              'jenis_absen': jenisAbsen,
               'latitude': latitude,
               'longitude': longitude,
+              'jarak_meter': jarakMeter,
               'foto': fotoBase64,
             }),
           )
@@ -56,14 +61,59 @@ class AbsensiService {
       } else {
         throw Exception(json['message'] ?? 'Absensi gagal');
       }
-    } on SocketException {
-      throw Exception(
-        'Tidak dapat terhubung ke server. Periksa koneksi jaringan.',
-      );
-    } on Exception {
-      rethrow;
-    }
+    } on TimeoutException {
+  throw Exception(
+    'Koneksi ke server terlalu lama.',
+  );
+} on http.ClientException {
+  throw Exception(
+    'Tidak dapat terhubung ke server.',
+  );
+} on FormatException catch (e) {
+  throw Exception(
+    'Format data riwayat tidak cocok: $e',
+  );
+} catch (e) {
+  throw Exception(
+    e.toString().replaceFirst('Exception: ', ''),
+  );
+}
   }
+
+
+  // ---- STATUS ABSENSI HARI INI -----------------------------
+Future<Map<String, dynamic>> getStatusHariIni(int userId) async {
+  try {
+    final response = await http
+        .get(
+          Uri.parse(
+            '${ApiConfig.absensi}?user_id=$userId',
+          ),
+        )
+        .timeout(const Duration(seconds: 15));
+
+    final json =
+        jsonDecode(response.body) as Map<String, dynamic>;
+
+    if (json['status'] == 'success') {
+      return json['data'] as Map<String, dynamic>;
+    }
+
+    throw Exception(
+      json['message'] ?? 'Gagal mengambil status absensi',
+    );
+  } on TimeoutException {
+    throw Exception('Koneksi ke server terlalu lama.');
+  } on http.ClientException {
+    throw Exception('Tidak dapat terhubung ke server.');
+  } on FormatException {
+    throw Exception('Respons server tidak valid.');
+  } catch (e) {
+    throw Exception(
+      e.toString().replaceFirst('Exception: ', ''),
+    );
+  }
+}
 
   // ---- AMBIL RIWAYAT ----------------------------------------
   /// Ambil 30 riwayat absensi terakhir untuk user tertentu.
@@ -84,10 +134,22 @@ class AbsensiService {
       } else {
         throw Exception(json['message'] ?? 'Gagal memuat riwayat');
       }
-    } on SocketException {
-      throw Exception('Tidak dapat terhubung ke server.');
-    } on Exception {
-      rethrow;
-    }
-  }
+    } on TimeoutException {
+  throw Exception(
+    'Koneksi ke server terlalu lama.',
+  );
+} on http.ClientException {
+  throw Exception(
+    'Tidak dapat terhubung ke server.',
+  );
+} on FormatException {
+  throw Exception(
+    'Respons server tidak valid.',
+  );
+} catch (e) {
+  throw Exception(
+    e.toString().replaceFirst('Exception: ', ''),
+  );
+}
+}
 }

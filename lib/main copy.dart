@@ -1,7 +1,7 @@
 // ============================================================
 // main.dart – Entry point aplikasi
-// Tugas: Inisialisasi Flutter, set tema Material 3 modern, 
-//        dan tentukan halaman awal.
+// Tugas: Inisialisasi Flutter, set tema, dan tentukan halaman
+//        awal berdasarkan status login (ada sesi atau tidak).
 // ============================================================
 
 import 'package:flutter/material.dart';
@@ -11,6 +11,7 @@ import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 
 void main() async {
+  // Pastikan binding Flutter siap sebelum akses plugin (SharedPreferences)
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const AbsensiApp());
 }
@@ -24,80 +25,59 @@ class AbsensiApp extends StatelessWidget {
       title: 'Smart Attendance',
       debugShowCheckedModeBanner: false,
 
-      // ---- Tema global aplikasi (Material 3 Modern) ----
+      // ---- Tema global aplikasi ----
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2563EB), 
+          seedColor: const Color(0xFF2563EB), // biru utama
           brightness: Brightness.light,
-          surface: const Color(0xFFF8FAFC), // Background aplikasi kekinian
         ),
         useMaterial3: true,
         fontFamily: 'Roboto',
 
-        // Gaya AppBar Modern
+        // Gaya AppBar
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF1E40AF),
           foregroundColor: Colors.white,
           elevation: 0,
-          centerTitle: false,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.vertical(
-              bottom: Radius.circular(16),
-            ),
-          ),
         ),
 
-        // Gaya Card Modern (Flat, sudut membulat halus)
-        cardTheme: const CardThemeData(
-          elevation: 0,
-          color: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(24)),
-            side: BorderSide(color: Color(0xFFF1F5F9), width: 1.5),
-          ),
-          margin: EdgeInsets.zero,
-        ),
-
-        // Gaya tombol utama modern
+        // Gaya tombol utama
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF2563EB),
             foregroundColor: Colors.white,
-            elevation: 0,
-            minimumSize: const Size(double.infinity, 56),
+            minimumSize: const Size(double.infinity, 50),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
         ),
 
-        // Gaya input field modern (Filled)
+        // Gaya input field
         inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFF1F5F9),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF2563EB), width: 2),
+            borderRadius: BorderRadius.circular(10),
           ),
           contentPadding: const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 18,
+            horizontal: 14,
+            vertical: 14,
           ),
         ),
       ),
 
+      // ---- Tentukan halaman awal ----
+      // FutureBuilder digunakan karena cek SharedPreferences bersifat async
       home: FutureBuilder<bool>(
         future: _cekSudahLogin(),
         builder: (context, snapshot) {
+          // Tampilkan loading spinner saat mengecek sesi
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Scaffold(
               body: Center(child: CircularProgressIndicator()),
             );
           }
+          // Jika sudah login → langsung ke HomeScreen
+          // Jika belum → ke LoginScreen
           final sudahLogin = snapshot.data ?? false;
           return sudahLogin ? const HomeScreen() : const LoginScreen();
         },
@@ -105,6 +85,8 @@ class AbsensiApp extends StatelessWidget {
     );
   }
 
+  /// Cek apakah user sudah login dengan melihat SharedPreferences.
+  /// Mengembalikan true jika user_id tersimpan dan > 0.
   Future<bool> _cekSudahLogin() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id') ?? 0;

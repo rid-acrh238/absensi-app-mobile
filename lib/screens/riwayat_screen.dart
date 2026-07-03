@@ -130,133 +130,260 @@ class RiwayatScreenState extends State<RiwayatScreen> {
   }
 
   Widget _buildItem(AbsensiModel item) {
-    // Format tanggal & jam — pakai teks biasa tanpa karakter unicode aneh
-    final bulanList = [
-      '',
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'Mei',
-      'Jun',
-      'Jul',
-      'Agu',
-      'Sep',
-      'Okt',
-      'Nov',
-      'Des'
-    ];
-    final hariList = [
-      'Senin',
-      'Selasa',
-      'Rabu',
-      'Kamis',
-      'Jumat',
-      'Sabtu',
-      'Minggu'
-    ];
-    final tgl = '${hariList[item.waktu.weekday - 1]}, '
-        '${item.waktu.day} ${bulanList[item.waktu.month]} ${item.waktu.year}';
-    final jam = '${item.waktu.hour.toString().padLeft(2, '0')}:'
-        '${item.waktu.minute.toString().padLeft(2, '0')}';
+  const namaBulan = [
+    '',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'Mei',
+    'Jun',
+    'Jul',
+    'Agu',
+    'Sep',
+    'Okt',
+    'Nov',
+    'Des',
+  ];
 
-    final isHadir = item.isHadir;
-    final badgeColor = isHadir ? Colors.green : Colors.orange;
-    final badgeText = isHadir ? 'HADIR' : 'TERLAMBAT';
+  String formatJam(String? value) {
+    if (value == null || value.isEmpty || value == 'null') {
+      return '--:--';
+    }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Foto thumbnail
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: item.foto.isNotEmpty
-                  ? Image.network(
-                      '${ApiConfig.fotoBase}/${item.foto}',
-                      width: 60,
-                      height: 60,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => _fotoPlaceholder(),
-                    )
-                  : _fotoPlaceholder(),
-            ),
-            const SizedBox(width: 12),
+    final bagian = value.split(':');
 
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Tanggal & jam
-                  Text('$tgl  $jam',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                  const SizedBox(height: 6),
+    if (bagian.length >= 2) {
+      return '${bagian[0]}:${bagian[1]}';
+    }
 
-                  // Badge status – pakai icon Flutter bukan emoji
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: badgeColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                              color: badgeColor.withValues(alpha: 0.4)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isHadir
-                                  ? Icons.check_circle
-                                  : Icons.warning_amber,
-                              size: 12,
-                              color: badgeColor,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(badgeText,
-                                style: TextStyle(
-                                    color: badgeColor,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-
-                  // Koordinat – pakai icon Flutter bukan emoji
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on,
-                          size: 12, color: Colors.grey),
-                      const SizedBox(width: 2),
-                      Flexible(
-                        child: Text(
-                          '${item.latitude.toStringAsFixed(5)}, '
-                          '${item.longitude.toStringAsFixed(5)}',
-                          style:
-                              const TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return value;
   }
 
+  final tanggal = DateTime.tryParse(item.tanggal);
+
+  final teksTanggal = tanggal == null
+      ? item.tanggal
+      : '${tanggal.day} ${namaBulan[tanggal.month]} ${tanggal.year}';
+
+  final sudahMasuk =
+      item.jamMasuk != null && item.jamMasuk!.isNotEmpty;
+
+  final sudahPulang =
+      item.jamPulang != null && item.jamPulang!.isNotEmpty;
+
+  final String badgeText;
+  final Color badgeColor;
+  final IconData badgeIcon;
+
+  if (sudahPulang) {
+    badgeText = 'LENGKAP';
+    badgeColor = Colors.green;
+    badgeIcon = Icons.check_circle;
+  } else if (sudahMasuk) {
+    badgeText = 'BELUM PULANG';
+    badgeColor = Colors.orange;
+    badgeIcon = Icons.schedule;
+  } else {
+    badgeText = 'BELUM MASUK';
+    badgeColor = Colors.red;
+    badgeIcon = Icons.cancel_outlined;
+  }
+
+  return Card(
+    margin: const EdgeInsets.only(bottom: 12),
+    elevation: 1,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.all(14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: item.foto.isNotEmpty
+                ? Image.network(
+                    ApiConfig.getFotoUrl(item.foto),
+                    width: 64,
+                    height: 64,
+                    fit: BoxFit.cover,
+
+                    webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+
+
+                    errorBuilder: (context, error, stackTrace) {
+  debugPrint(
+    'URL FOTO RIWAYAT: ${ApiConfig.getFotoUrl(item.foto)}',
+  );
+  debugPrint('ERROR FOTO: $error');
+
+  return _fotoPlaceholder();
+},
+                  )
+                : _fotoPlaceholder(),
+          ),
+          const SizedBox(width: 14),
+
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.calendar_today,
+                      size: 14,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        teksTanggal,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: badgeColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: badgeColor.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            badgeIcon,
+                            size: 12,
+                            color: badgeColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            badgeText,
+                            style: TextStyle(
+                              color: badgeColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 12),
+
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildJamInfo(
+                        title: 'Jam Masuk',
+                        jam: formatJam(item.jamMasuk),
+                        icon: Icons.login,
+                        color: Colors.green,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _buildJamInfo(
+                        title: 'Jam Pulang',
+                        jam: formatJam(item.jamPulang),
+                        icon: Icons.logout,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 10),
+
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      size: 13,
+                      color: Colors.grey,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      item.status == 'terlambat'
+                          ? 'Status masuk: Terlambat'
+                          : 'Status masuk: Hadir',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: item.status == 'terlambat'
+                            ? Colors.orange
+                            : Colors.grey,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+  Widget _buildJamInfo({
+  required String title,
+  required String jam,
+  required IconData icon,
+  required Color color,
+}) {
+  return Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Row(
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: color,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Colors.grey,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                jam,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
   Widget _fotoPlaceholder() {
     return Container(
       width: 60,

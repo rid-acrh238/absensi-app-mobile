@@ -8,9 +8,10 @@
 // ============================================================
 
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 import 'dart:math';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -53,13 +54,21 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
   String _pesanLokasi = 'Mendeteksi lokasi...';
 
   // ---- State Foto ----
-  File? _fotoFile;
-  final _picker = ImagePicker();
+  Uint8List? _fotoBytes;
+  final ImagePicker _picker = ImagePicker();
 
   // ---- State Absensi ----
   bool _isLoading = false;
   bool _sudahAbsen = false;
   String _statusAbsen = '';
+  String _jenisAbsen = 'masuk';
+
+  bool _loadingStatus = true;
+bool _sudahMasuk = false;
+bool _sudahPulang = false;
+
+String? _jamMasuk;
+String? _jamPulang;
 
   // ---- Map Controller ----
   final _mapController = MapController();
@@ -79,6 +88,7 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
     super.initState();
     _startJamTimer();
     _loadSettingsThenLocation();
+    _loadStatusHariIni();
   }
 
   @override
@@ -150,6 +160,61 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
     }
   }
 
+  Future<void> _loadStatusHariIni() async {
+  if (widget.user == null) {
+    if (mounted) {
+      setState(() {
+        _loadingStatus = false;
+      });
+    }
+    return;
+  }
+
+  try {
+    final data = await _absensiService.getStatusHariIni(
+      widget.user!.userId,
+    );
+
+    if (!mounted) return;
+
+    final jamMasuk = data['jam_masuk']?.toString();
+    final jamPulang = data['jam_pulang']?.toString();
+
+    final sudahMasuk =
+        data['sudah_masuk'] == true ||
+        (jamMasuk != null &&
+            jamMasuk.isNotEmpty &&
+            jamMasuk != 'null');
+
+    final sudahPulang =
+        data['sudah_pulang'] == true ||
+        (jamPulang != null &&
+            jamPulang.isNotEmpty &&
+            jamPulang != 'null');
+
+    setState(() {
+      _jamMasuk = jamMasuk;
+      _jamPulang = jamPulang;
+
+      _sudahMasuk = sudahMasuk;
+      _sudahPulang = sudahPulang;
+
+      _sudahAbsen = sudahMasuk;
+      _statusAbsen = data['status']?.toString() ?? '';
+
+      _jenisAbsen = sudahMasuk ? 'pulang' : 'masuk';
+      _loadingStatus = false;
+    });
+  } catch (e) {
+    if (!mounted) return;
+
+    setState(() {
+      _loadingStatus = false;
+    });
+
+    debugPrint('Gagal mengambil status absensi: $e');
+  }
+}
   // ---- GPS --------------------------------------------------
   Future<void> _getLocation() async {
     setState(() {
@@ -227,24 +292,50 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
   double _deg2rad(double deg) => deg * pi / 180;
 
   // ---- KAMERA / FOTO ----------------------------------------
-  Future<void> _ambilFotoKamera() async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.camera,
-      preferredCameraDevice: CameraDevice.front,
-      imageQuality: 70,
-      maxWidth: 640,
+  Future<void> _simpanFoto(XFile? picked) async {
+  if (picked == null) return;
+
+  try {
+    final bytes = await picked.readAsBytes();
+
+    if (!mounted) return;
+
+    setState(() {
+      _fotoBytes = bytes;
+    });
+  } catch (e) {
+    if (!mounted) return;
+
+    _showSnackBar(
+      'Gagal membaca foto: $e',
+      isError: true,
     );
-    if (picked != null) setState(() => _fotoFile = File(picked.path));
+  }
+}
+
+  Future<void> _ambilFotoKamera() async {
+    final bytes = await showDialog<Uint8List>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _CameraCaptureDialog(),
+    );
+
+    if (bytes == null || !mounted) return;
+
+    setState(() {
+      _fotoBytes = bytes;
+    });
   }
 
-  Future<void> _pilihFotoGaleri() async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 70,
-      maxWidth: 640,
-    );
-    if (picked != null) setState(() => _fotoFile = File(picked.path));
-  }
+Future<void> _pilihFotoGaleri() async {
+  final picked = await _picker.pickImage(
+    source: ImageSource.gallery,
+    imageQuality: 70,
+    maxWidth: 640,
+  );
+
+  await _simpanFoto(picked);
+}
 
   void _showPilihFoto() {
     showModalBottomSheet(
@@ -300,7 +391,7 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
           isError: true);
       return;
     }
-    if (_fotoFile == null) {
+    if (_fotoBytes == null) {
       _showSnackBar('Foto selfie wajib diambil sebelum absensi.',
           isError: true);
       return;
@@ -313,11 +404,21 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
     setState(() => _isLoading = true);
 
     try {
+      debugPrint(
+  'KIRIM ABSENSI: '
+  'userId=${widget.user!.userId}, '
+  'jenis=$_jenisAbsen, '
+  'lat=$_lat, '
+  'lng=$_lng, '
+  'jarak=$_jarak',
+);
       final result = await _absensiService.kirimAbsensi(
         userId: widget.user!.userId,
+        jenisAbsen: _jenisAbsen,
         latitude: _lat!,
         longitude: _lng!,
-        fotoFile: _fotoFile,
+        jarakMeter: _jarak,
+        fotoBytes: _fotoBytes,
       );
 
       if (!mounted) return;
@@ -325,11 +426,15 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
       final status = result['status']?.toString() ?? 'hadir';
       final jarak = result['jarak']?.toString() ?? '-';
       final waktu = result['waktu']?.toString() ?? '-';
+      final jenis = result['jenis_absen']?.toString() ?? _jenisAbsen;
 
-      setState(() {
-        _sudahAbsen = true;
-        _statusAbsen = status;
-      });
+      await _loadStatusHariIni();
+
+if (!mounted) return;
+
+setState(() {
+  _fotoBytes = null;
+});
 
       // Panggil callback agar RiwayatScreen auto-refresh
       widget.onAbsensiSuccess?.call();
@@ -342,17 +447,18 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(children: [
             Icon(
-              status == 'hadir' ? Icons.check_circle : Icons.warning_amber,
-              color: status == 'hadir' ? Colors.green : Colors.orange,
+              jenis == 'pulang' ? Icons.logout : Icons.check_circle,
+              color: jenis == 'pulang' ? Colors.blue : Colors.green,
               size: 28,
             ),
             const SizedBox(width: 8),
-            const Text('Absensi Berhasil'),
+            Text(jenis == 'pulang' ? 'Absensi Pulang Berhasil' : 'Absensi Masuk Berhasil'),
           ]),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _infoRow('Jenis', jenis.toUpperCase()),
               _infoRow('Status', status.toUpperCase(),
                   color: status == 'hadir' ? Colors.green : Colors.orange),
               _infoRow('Jarak', jarak),
@@ -419,6 +525,8 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
       child: Column(
         children: [
           _buildStatusCard(),
+          const SizedBox(height: 12),
+          _buildJenisAbsenSelector(),
           const SizedBox(height: 12),
           _buildLokasiCard(),
           const SizedBox(height: 12),
@@ -652,6 +760,8 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
     );
   }
 
+
+
   // ---- FOTO CARD --------------------------------------------
   Widget _buildFotoCard() {
     return Card(
@@ -668,18 +778,18 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
                   style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ]),
             const SizedBox(height: 12),
-            if (_fotoFile != null)
+            if (_fotoBytes != null)
               Stack(children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: Image.file(_fotoFile!,
+                  child: Image.memory(_fotoBytes!,
                       width: double.infinity, height: 220, fit: BoxFit.cover),
                 ),
                 Positioned(
                   top: 8,
                   right: 8,
                   child: GestureDetector(
-                    onTap: () => setState(() => _fotoFile = null),
+                    onTap: () => setState(() => _fotoBytes = null),
                     child: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
@@ -739,34 +849,484 @@ class _AbsensiScreenState extends State<AbsensiScreen> {
     );
   }
 
+  // jenis absen
+
+  Widget _buildJenisAbsenSelector() {
+  return Card(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    child: Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.swap_horiz, size: 16, color: Color(0xFF2563EB)),
+              SizedBox(width: 6),
+              Text(
+                'Jenis Absensi',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SegmentedButton<String>(
+            selected: {_jenisAbsen},
+            onSelectionChanged: (value) {
+              setState(() {
+                _jenisAbsen = value.first;
+              });
+            },
+            segments: [
+  ButtonSegment<String>(
+    value: 'masuk',
+    enabled: !_sudahMasuk,
+    label: const Text('Masuk'),
+    icon: const Icon(Icons.login),
+  ),
+  ButtonSegment<String>(
+    value: 'pulang',
+    enabled: _sudahMasuk && !_sudahPulang,
+    label: const Text('Pulang'),
+    icon: const Icon(Icons.logout),
+  ),
+],
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+
   // ---- TOMBOL ABSEN -----------------------------------------
   Widget _buildTombolAbsen() {
-    return SizedBox(
-      width: double.infinity,
-      height: 54,
-      child: ElevatedButton.icon(
-        onPressed: (_isLoading || _sudahAbsen) ? null : _doAbsensi,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: _sudahAbsen ? Colors.grey : const Color(0xFF2563EB),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+  final bool bolehAbsen;
+
+  if (_jenisAbsen == 'masuk') {
+    bolehAbsen = !_sudahMasuk;
+  } else {
+    bolehAbsen = _sudahMasuk && !_sudahPulang;
+  }
+
+  String label;
+
+  if (_loadingStatus) {
+    label = 'Memuat Status...';
+  } else if (_jenisAbsen == 'masuk' && _sudahMasuk) {
+    label = 'Sudah Absen Masuk';
+  } else if (_jenisAbsen == 'pulang' && !_sudahMasuk) {
+    label = 'Lakukan Absen Masuk Terlebih Dahulu';
+  } else if (_jenisAbsen == 'pulang' && _sudahPulang) {
+    label = 'Sudah Absen Pulang';
+  } else if (_jenisAbsen == 'pulang') {
+    label = 'Lakukan Absen Pulang';
+  } else {
+    label = 'Lakukan Absen Masuk';
+  }
+
+  return SizedBox(
+    width: double.infinity,
+    height: 54,
+    child: ElevatedButton.icon(
+      onPressed:
+          (_isLoading || _loadingStatus || !bolehAbsen)
+              ? null
+              : _doAbsensi,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF2563EB),
+        disabledBackgroundColor: Colors.grey.shade400,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
         ),
-        icon: _isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2.5))
-            : Icon(_sudahAbsen ? Icons.check : Icons.fingerprint),
-        label: Text(
-          _isLoading
-              ? 'Memproses...'
-              : _sudahAbsen
-                  ? 'Sudah Absen Hari Ini'
-                  : 'Lakukan Absensi',
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      ),
+      icon: _isLoading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 2.5,
+              ),
+            )
+          : Icon(
+              _jenisAbsen == 'pulang'
+                  ? Icons.logout
+                  : Icons.login,
+            ),
+      label: Text(
+        _isLoading ? 'Memproses...' : label,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+  );
+}
+}
+
+class _CameraCaptureDialog extends StatefulWidget {
+  const _CameraCaptureDialog();
+
+  @override
+  State<_CameraCaptureDialog> createState() =>
+      _CameraCaptureDialogState();
+}
+
+class _CameraCaptureDialogState extends State<_CameraCaptureDialog> {
+  CameraController? _controller;
+  List<CameraDescription> _cameras = const [];
+
+  int _selectedCameraIndex = 0;
+  bool _isInitializing = true;
+  bool _isCapturing = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeCamera();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _initializeCamera() async {
+    if (mounted) {
+      setState(() {
+        _isInitializing = true;
+        _errorMessage = null;
+      });
+    }
+
+    try {
+      final cameras = await availableCameras();
+
+      if (cameras.isEmpty) {
+        throw CameraException(
+          'cameraNotFound',
+          'Tidak ada kamera yang ditemukan.',
+        );
+      }
+
+      _cameras = cameras;
+
+      int selectedIndex = cameras.indexWhere(
+        (camera) => camera.lensDirection == CameraLensDirection.front,
+      );
+
+      if (selectedIndex < 0) {
+        selectedIndex = cameras.indexWhere(
+          (camera) => camera.lensDirection == CameraLensDirection.external,
+        );
+      }
+
+      if (selectedIndex < 0) {
+        selectedIndex = 0;
+      }
+
+      await _startCamera(selectedIndex);
+    } on CameraException catch (e) {
+      _setCameraError(_cameraErrorMessage(e));
+    } catch (e) {
+      _setCameraError('Kamera gagal dibuka: $e');
+    }
+  }
+
+  Future<void> _startCamera(int cameraIndex) async {
+    if (_cameras.isEmpty) return;
+
+    if (mounted) {
+      setState(() {
+        _isInitializing = true;
+        _errorMessage = null;
+      });
+    }
+
+    final oldController = _controller;
+    _controller = null;
+    await oldController?.dispose();
+
+    final controller = CameraController(
+      _cameras[cameraIndex],
+      ResolutionPreset.medium,
+      enableAudio: false,
+    );
+
+    try {
+      await controller.initialize();
+
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _controller = controller;
+        _selectedCameraIndex = cameraIndex;
+        _isInitializing = false;
+      });
+    } on CameraException catch (e) {
+      await controller.dispose();
+      _setCameraError(_cameraErrorMessage(e));
+    } catch (e) {
+      await controller.dispose();
+      _setCameraError('Kamera gagal diinisialisasi: $e');
+    }
+  }
+
+  void _setCameraError(String message) {
+    if (!mounted) return;
+
+    setState(() {
+      _isInitializing = false;
+      _errorMessage = message;
+    });
+  }
+
+  String _cameraErrorMessage(CameraException error) {
+    switch (error.code) {
+      case 'CameraAccessDenied':
+      case 'cameraPermission':
+      case 'permissionDenied':
+        return 'Izin kamera ditolak. Izinkan kamera melalui pengaturan situs Edge.';
+      case 'CameraAccessDeniedWithoutPrompt':
+        return 'Izin kamera diblokir. Buka pengaturan situs Edge lalu ubah Camera menjadi Allow.';
+      case 'CameraAccessRestricted':
+        return 'Akses kamera dibatasi oleh perangkat atau browser.';
+      case 'cameraNotFound':
+        return 'Kamera tidak ditemukan pada perangkat ini.';
+      default:
+        return error.description ?? 'Kamera gagal dibuka.';
+    }
+  }
+
+  Future<void> _switchCamera() async {
+    if (_cameras.length < 2 || _isInitializing || _isCapturing) {
+      return;
+    }
+
+    final nextIndex = (_selectedCameraIndex + 1) % _cameras.length;
+    await _startCamera(nextIndex);
+  }
+
+  Future<void> _capturePhoto() async {
+    final controller = _controller;
+
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        controller.value.isTakingPicture ||
+        _isCapturing) {
+      return;
+    }
+
+    setState(() {
+      _isCapturing = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final picture = await controller.takePicture();
+      final bytes = await picture.readAsBytes();
+
+      if (!mounted) return;
+      Navigator.of(context).pop(bytes);
+    } on CameraException catch (e) {
+      _setCameraError(_cameraErrorMessage(e));
+    } catch (e) {
+      _setCameraError('Foto gagal diambil: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCapturing = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.sizeOf(context);
+    final dialogWidth = min(screenSize.width - 24, 760.0);
+    final dialogHeight = min(screenSize.height - 24, 680.0);
+
+    return Dialog(
+      insetPadding: const EdgeInsets.all(12),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: SizedBox(
+        width: dialogWidth,
+        height: dialogHeight,
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: ColoredBox(
+                color: Colors.black,
+                child: _buildCameraBody(),
+              ),
+            ),
+            _buildControls(),
+          ],
         ),
       ),
     );
   }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 12, 8, 12),
+      color: Colors.white,
+      child: Row(
+        children: [
+          const Icon(
+            Icons.photo_camera,
+            color: Color(0xFF2563EB),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Ambil Foto Selfie',
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Tutup kamera',
+            onPressed: _isCapturing
+                ? null
+                : () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCameraBody() {
+    if (_isInitializing) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.white),
+            SizedBox(height: 14),
+            Text(
+              'Membuka kamera...',
+              style: TextStyle(color: Colors.white),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.videocam_off_outlined,
+                color: Colors.white70,
+                size: 56,
+              ),
+              const SizedBox(height: 14),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              FilledButton.icon(
+                onPressed: _initializeCamera,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Coba Lagi'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final controller = _controller;
+
+    if (controller == null || !controller.value.isInitialized) {
+      return const Center(
+        child: Text(
+          'Kamera belum siap.',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    }
+
+    return Center(
+      child: AspectRatio(
+        aspectRatio: controller.value.aspectRatio,
+        child: CameraPreview(controller),
+      ),
+    );
+  }
+
+  Widget _buildControls() {
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 14,
+      ),
+      color: Colors.white,
+      child: Row(
+        children: [
+          if (_cameras.length > 1)
+            IconButton.filledTonal(
+              tooltip: 'Ganti kamera',
+              onPressed: _switchCamera,
+              icon: const Icon(Icons.cameraswitch),
+            )
+          else
+            const SizedBox(width: 48),
+          const Spacer(),
+          FilledButton.icon(
+            onPressed: _isInitializing ||
+                    _errorMessage != null ||
+                    _isCapturing
+                ? null
+                : _capturePhoto,
+            style: FilledButton.styleFrom(
+              minimumSize: const Size(170, 50),
+              backgroundColor: const Color(0xFF2563EB),
+            ),
+            icon: _isCapturing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.camera_alt),
+            label: Text(
+              _isCapturing ? 'Mengambil...' : 'Ambil Foto',
+            ),
+          ),
+          const Spacer(),
+          const SizedBox(width: 48),
+        ],
+      ),
+    );
+  }
 }
+
