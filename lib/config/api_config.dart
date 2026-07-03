@@ -11,7 +11,7 @@ class ApiConfig {
   // Contoh: 192.168.1.100
   // Jangan gunakan "localhost" karena di Android = loopback HP sendiri.
   // ----------------------------------------------------------------
-  static const String serverIp = 'localhost';
+  static const String serverIp = '10.186.149.86';
 
   static const String rootUrl = 'http://$serverIp/absensi';
 
